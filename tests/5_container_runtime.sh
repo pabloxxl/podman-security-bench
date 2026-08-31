@@ -112,7 +112,8 @@ check_5_3() {
     logit "ERROR: File '$allowed_file' not found or not readable!"
     return
   }
-  local allowed_caps=$(paste -sd'|' "${allowed_file}")
+  local allowed_caps
+  allowed_caps=$(paste -sd'|' "${allowed_file}")
 
   starttestjson "$id" "$desc"
 
@@ -348,6 +349,7 @@ check_5_8() {
   local remediationImpact="None."
   local check="$id - $desc"
   local allowed_file="${LISTS_PATH}/allow_check_${id}"
+
   [ ! -r "${allowed_file}" ] && {
     logit "ERROR: File '$allowed_file' not found or not readable!"
     return
@@ -357,21 +359,23 @@ check_5_8() {
 
   fail=0
   id_containers=""
+
   for c in $containers; do
-    rawPorts=$(podman inspect "$c" --format '{{ .NetworkSettings.Ports }}')
-    for rawport in ${rawPorts}; do
+    extracted_ports=$(podman inspect "$c" | jq -r '.[0].NetworkSettings.Ports | objects | keys[]?' 2>/dev/null | cut -d'/' -f1)
+
+    for port in $extracted_ports; do
       not_allowed_found="0"
-      # shellcheck disable=SC2001
-      port="$(echo "$rawport" | sed 's/[^[:digit:]]*//g')"
-      if [ -n "${port}" ] && ! grep -q "${port}" "${allowed_file}" 2>/dev/null; then
+
+      if [ -n "${port}" ] && ! grep -q "^${port}$" "${allowed_file}" 2>/dev/null; then
         not_allowed_found=$port
       fi
+
       if [ "$not_allowed_found" != "0" ]; then
         if [ $fail -eq 0 ]; then
           fail=1
           info -c "$check"
         fi
-        warn "      * Not allowed port found: $c"
+        warn "      * Not allowed port found: $c exposes $not_allowed_found"
         id_containers="$id_containers $c/$not_allowed_found"
       fi
     done
@@ -382,6 +386,7 @@ check_5_8() {
     logcheckresult "PASS"
     return
   fi
+
   logcheckresult "WARN" "Not allowed ports found" "$id_containers"
 }
 
